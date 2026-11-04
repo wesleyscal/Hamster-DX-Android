@@ -76,6 +76,7 @@ jobs:
           p = Path('fingertech/app/build.gradle')
           x = p.read_text()
           x = x.replace('android {', 'android {\n    packagingOptions {\n        doNotStrip "**/*.so"\n    }', 1)
+          x += '\n// Old Android Gradle Plugin cannot locate modern NDK strip binary.\ntasks.whenTaskAdded { task ->\n    if (task.name == "stripDebugDebugSymbols") task.enabled = false\n}\n'
           p.write_text(x)
           PY
           chmod +x fingertech/gradlew
