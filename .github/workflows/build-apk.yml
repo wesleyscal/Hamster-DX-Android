@@ -1,0 +1,83 @@
+name: Build Hamster DX Android APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 35
+    steps:
+      - name: Checkout official FingerTech project
+        uses: actions/checkout@v4
+        with:
+          repository: FingerTechBR/FingertechHamster-AndroidAPP-
+          ref: master
+          path: fingertech
+          persist-credentials: false
+
+      - name: Install JDK 17 for Android SDK tools
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android 28 and Build Tools 29
+        run: sdkmanager --install 'platforms;android-28' 'build-tools;29.0.0'
+
+      - name: Set up JDK 8 for legacy build
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '8'
+
+      - name: Patch legacy sample for demonstration build
+        shell: bash
+        run: |
+          sed -i 's/jcenter()/mavenCentral()/g' fingertech/build.gradle
+          CRED='fingertech/app/src/main/java/com/fingertech/fingertechcapture/Utils/JavaMail/login_e_senha.java'
+          if [ ! -f "$CRED" ]; then
+            cat > "$CRED" <<'JAVA'
+          package com.fingertech.fingertechcapture.Utils.JavaMail;
+          // Empty credentials: demo app is not configured to send emails.
+          public final class login_e_senha {
+              public static final String login = "";
+              public static final String senha = "";
+              private login_e_senha() {}
+          }
+          JAVA
+          fi
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('fingertech/app/src/main/AndroidManifest.xml')
+          x = p.read_text()
+          x = x.replace('<uses-permission android:name="android.permission.INTERNET" />', '')
+          x = x.replace('android:allowBackup="true"', 'android:allowBackup="false"')
+          x = x.replace('android:usesCleartextTraffic="true"', 'android:usesCleartextTraffic="false"')
+          x = x.replace('<activity android:name=".Cadastro">\n            <intent-filter>\n                <action android:name="android.intent.action.MAIN" />\n\n                <category android:name="android.intent.category.LAUNCHER" />\n            </intent-filter>\n        </activity>', '<activity android:name=".Cadastro" />')
+          x = x.replace('<activity\n            android:name=".MainActivity"', '<activity\n            android:name=".MainActivity"')
+          x = x.replace('android:windowSoftInputMode="adjustResize|stateAlwaysHidden">', 'android:windowSoftInputMode="adjustResize|stateAlwaysHidden">\n            <intent-filter>\n                <action android:name="android.intent.action.MAIN" />\n                <category android:name="android.intent.category.LAUNCHER" />\n            </intent-filter>')
+          p.write_text(x)
+          PY
+          chmod +x fingertech/gradlew
+
+      - name: Build unsigned debug APK
+        working-directory: fingertech
+        run: ./gradlew --no-daemon :app:assembleDebug --stacktrace
+
+      - name: Publish APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Hamster-DX-Demo-Android-APK
+          path: fingertech/app/build/outputs/apk/debug/*.apk
+          retention-days: 7
+          if-no-files-found: error
