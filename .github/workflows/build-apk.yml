@@ -31,8 +31,10 @@ jobs:
         shell: bash
         run: |
           echo "ANDROID_HOME=${ANDROID_HOME}"
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager --install 'platforms;android-28' 'build-tools;29.0.0'
+          SDKMANAGER=$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager | head -1)
+          test -n "$SDKMANAGER"
+          echo "Using $SDKMANAGER"
+          "$SDKMANAGER" --install 'platforms;android-28' 'build-tools;29.0.0'
 
       - name: Set up JDK 8 for legacy build
         uses: actions/setup-java@v4
