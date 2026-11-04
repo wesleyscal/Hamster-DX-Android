@@ -70,6 +70,14 @@ jobs:
           x = x.replace('android:windowSoftInputMode="adjustResize|stateAlwaysHidden">', 'android:windowSoftInputMode="adjustResize|stateAlwaysHidden">\n            <intent-filter>\n                <action android:name="android.intent.action.MAIN" />\n                <category android:name="android.intent.category.LAUNCHER" />\n            </intent-filter>')
           p.write_text(x)
           PY
+          APP_GRADLE='fingertech/app/build.gradle'
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('fingertech/app/build.gradle')
+          x = p.read_text()
+          x = x.replace('android {', 'android {\n    packagingOptions {\n        doNotStrip "**/*.so"\n    }', 1)
+          p.write_text(x)
+          PY
           chmod +x fingertech/gradlew
 
       - name: Build unsigned debug APK
