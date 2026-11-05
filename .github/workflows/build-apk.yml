@@ -135,15 +135,54 @@ jobs:
           PY
           chmod +x fingertech/gradlew
 
+      - name: Package FingerTech native libraries from vendor AAR
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          from zipfile import ZipFile
+          aar = Path('fingertech/NBioBSPJNI_v2.0.0.3(11)/NBioBSPJNI_v2.0.0.3(11).aar')
+          output = Path('fingertech/app/src/main/jniLibs')
+          with ZipFile(aar) as archive:
+              libraries = [name for name in archive.namelist()
+                           if name.startswith('jni/') and name.endswith('.so')]
+              print('Vendor AAR native libraries:', libraries)
+              if not libraries:
+                  raise SystemExit('ERROR: Vendor AAR does not contain any jni/*.so libraries')
+              for entry in libraries:
+                  parts = Path(entry).parts
+                  assert len(parts) == 3 and parts[0] == 'jni'
+                  dest = output / parts[1] / parts[2]
+                  dest.parent.mkdir(parents=True, exist_ok=True)
+                  dest.write_bytes(archive.read(entry))
+          names = [p.name for p in output.rglob('*.so')]
+          if 'libnative-lib.so' not in names:
+              raise SystemExit('ERROR: libnative-lib.so not found in vendor AAR')
+          print('Packaged native ABI libraries:', [(p.parent.name, p.name) for p in output.rglob('*.so')])
+          PY
+
       - name: Build unsigned debug APK
         working-directory: fingertech
         run: ./gradlew --no-daemon :app:assembleDebug --stacktrace
+
+      - name: Verify native libraries exist in generated APK
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from zipfile import ZipFile
+          from pathlib import Path
+          apk = next(Path('fingertech/app/build/outputs/apk/debug').glob('*.apk'))
+          with ZipFile(apk) as z:
+              libs = [n for n in z.namelist() if n.startswith('lib/') and n.endswith('.so')]
+          print('APK native libraries:', libs)
+          assert any(n.endswith('/libnative-lib.so') for n in libs), 'APK missing libnative-lib.so'
+          PY
 
       - name: Publish APK
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: Hamster-DX-Android-v2-StartupFix
+          name: Hamster-DX-Android-v3-NativeSDK
           path: fingertech/app/build/outputs/apk/debug/*.apk
           retention-days: 7
           if-no-files-found: error
