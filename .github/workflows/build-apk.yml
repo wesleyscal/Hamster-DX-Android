@@ -165,6 +165,36 @@ jobs:
         working-directory: fingertech
         run: ./gradlew --no-daemon :app:assembleDebug --stacktrace
 
+      - name: Inject missing JNI libraries and re-sign debug APK
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          from zipfile import ZipFile, ZIP_STORED
+          src = next(Path('fingertech/app/build/outputs/apk/debug').glob('*.apk'))
+          original = src.with_suffix('.unsigned.apk')
+          aar = Path('fingertech/NBioBSPJNI_v2.0.0.3(11)/NBioBSPJNI_v2.0.0.3(11).aar')
+          supported = {'arm64-v8a', 'armeabi-v7a', 'x86', 'x86_64'}
+          with ZipFile(src) as app, ZipFile(original, 'w') as dest, ZipFile(aar) as vendor:
+              for item in app.infolist():
+                  # Discard previous signature (we sign the final file below).
+                  if item.filename.startswith('META-INF/') and item.filename.endswith(('.RSA', '.SF', '.MF', '.DSA', '.EC')):
+                      continue
+                  dest.writestr(item, app.read(item.filename))
+              for item in vendor.infolist():
+                  parts = Path(item.filename).parts
+                  if len(parts) == 3 and parts[0] == 'jni' and parts[1] in supported and parts[2].endswith('.so'):
+                      name = 'lib/' + '/'.join(parts[1:])
+                      dest.writestr(name, vendor.read(item.filename), compress_type=ZIP_STORED)
+                      print('Added:', name)
+          PY
+          SDK_BUILD_TOOLS="$ANDROID_HOME/build-tools/29.0.0"
+          APK="fingertech/app/build/outputs/apk/debug/app-debug.apk"
+          "$SDK_BUILD_TOOLS/zipalign" -f -p 4 "fingertech/app/build/outputs/apk/debug/app-debug.unsigned.apk" "fingertech/app/build/outputs/apk/debug/app-debug.aligned.apk"
+          "$SDK_BUILD_TOOLS/apksigner" sign --ks "$HOME/.android/debug.keystore" --ks-key-alias androiddebugkey --ks-pass pass:android --key-pass pass:android --out "$APK" "fingertech/app/build/outputs/apk/debug/app-debug.aligned.apk"
+          "$SDK_BUILD_TOOLS/apksigner" verify --verbose "$APK"
+          rm -f "fingertech/app/build/outputs/apk/debug/app-debug.unsigned.apk" "fingertech/app/build/outputs/apk/debug/app-debug.aligned.apk"
+
       - name: Verify native libraries exist in generated APK
         shell: bash
         run: |
@@ -182,7 +212,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: Hamster-DX-Android-v3-NativeSDK
+          name: Hamster-DX-Android-v3-NativeSDK-signed
           path: fingertech/app/build/outputs/apk/debug/*.apk
           retention-days: 7
           if-no-files-found: error
