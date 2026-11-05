@@ -70,6 +70,60 @@ jobs:
           x = x.replace('android:windowSoftInputMode="adjustResize|stateAlwaysHidden">', 'android:windowSoftInputMode="adjustResize|stateAlwaysHidden">\n            <intent-filter>\n                <action android:name="android.intent.action.MAIN" />\n                <category android:name="android.intent.category.LAUNCHER" />\n            </intent-filter>')
           p.write_text(x)
           PY
+          # Fix initial fragment startup: NavHost inflates HomeFragment during
+          # setContentView, before the sample constructs MainActivity.nitgen.
+          # The fragment dereferences a null SDK instance and the app closes.
+          python3 - <<'PY'
+          from pathlib import Path
+          main = Path('fingertech/app/src/main/java/com/fingertech/fingertechcapture/MainActivity.java')
+          src = main.read_text()
+          old = '        super.onCreate(savedInstanceState);\n        setContentView(R.layout.activity_main);'
+          new = '''        super.onCreate(savedInstanceState);
+                  // Initialize before inflating the NavHostFragment and HomeFragment.
+                  try {
+                      nitgen = new Nitgen(this, this);
+                      sdkStartupError = null;
+                  } catch (Throwable error) {
+                      nitgen = null;
+                      sdkStartupError = error.getClass().getSimpleName() + ": " + String.valueOf(error.getMessage());
+                      android.util.Log.e("HamsterDX", "Could not initialize SDK", error);
+                  }
+                  setContentView(R.layout.activity_main);'''
+          assert old in src, 'MainActivity lifecycle anchor missing'
+          src = src.replace(old, new, 1)
+          old = '        this.nitgen = new Nitgen(this, this);'
+          assert old in src, 'Late SDK initialization anchor missing'
+          src = src.replace(old, '', 1)
+          old = '    public static Nitgen nitgen;'
+          assert old in src, 'SDK field anchor missing'
+          src = src.replace(old, old + '\n    public static String sdkStartupError;', 1)
+          main.write_text(src)
+
+          home = Path('fingertech/app/src/main/java/com/fingertech/fingertechcapture/ui/home/HomeFragment.java')
+          src = home.read_text()
+          old = '''        nitgen = MainActivity.nitgen;
+                  nitgen.setView(this);
+                  if(!status) {'''
+          new = '''        nitgen = MainActivity.nitgen;
+                  if (nitgen == null) {
+                      txt_sdk_verssao.setText("Falha ao iniciar SDK: " + MainActivity.sdkStartupError);
+                      for (Button b : botoesenables) b.setEnabled(false);
+                      btn_iniciar_dispositivo.setEnabled(false);
+                  } else {
+                      nitgen.setView(this);
+                  }
+                  if(nitgen != null && !status) {'''
+          assert old in src, 'HomeFragment SDK access anchor missing'
+          src = src.replace(old, new, 1)
+          src = src.replace('''        }else{
+                    btn_iniciar_dispositivo.setText("Fechar Dispositivo");
+                }
+                solicita_permissao''','''        }else if(nitgen != null){
+                    btn_iniciar_dispositivo.setText("Fechar Dispositivo");
+                }
+                solicita_permissao''',1)
+          home.write_text(src)
+          PY
           APP_GRADLE='fingertech/app/build.gradle'
           python3 - <<'PY'
           from pathlib import Path
@@ -89,7 +143,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: Hamster-DX-Demo-Android-APK
+          name: Hamster-DX-Android-v2-StartupFix
           path: fingertech/app/build/outputs/apk/debug/*.apk
           retention-days: 7
           if-no-files-found: error
